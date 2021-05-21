@@ -1,0 +1,21 @@
+{
+    "name": "user/search-engine",
+    "description": "Search scrapper for web html pages",
+    "type": "project",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Bohdan Lyhoshapko",
+            "email": "bohdan09012000@gmail.com"
+        }
+    ],
+    "require": {
+        "electrolinux/phpquery": "^0.9.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "Helpers\\" : "Helpers/",
+            "Http\\" : "Http/"
+        }
+    }
+}
