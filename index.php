@@ -27,6 +27,8 @@ $scrapper = new Scraper($htmlDOM);
 $result =  $scrapper->scrap()->result();
 
 print_r($result);
+print_r($scrapper->getCount());
+
 
 
 

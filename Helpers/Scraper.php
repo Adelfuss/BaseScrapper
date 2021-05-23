@@ -5,37 +5,41 @@ class Scraper
 {
     private $htmlDOM;
     private $result = [];
-    const IS_JSON_MODE = true;
-    private $scrappingSchema = [
+    private $columns = [];
+    private $totalCount;
+    private $columnBase = 'tbody[data-mark-id="%s"] %s';
+    private $countSelector = '.number.qa-count';
+    private $columnRule = [
+        'selector' => 'table tbody tr td.number a',
+        'method' => 'text'
+    ];
+    private $columnElemSchema = [
         'id' => [
-            'selector_rule' => 'tbody tr td.table-index span',
+            'selector' => 'tr td.table-index span',
             'method' => 'text'
         ],
         'number' => [
-            'selector_rule' => 'tbody tr td.number a',
+            'selector' => 'tr td.number a',
             'method' => 'text'
         ],
-        'details_page_url' => [
-            'selector_rule' => 'tbody tr td.number a',
-            'method' => ['attr:href']
-        ],
-        'logo_url' => [
-            'selector_rule' => 'tbody tr td.trademark.image img',
+        'logo_img' => [
+            'selector' => 'tr td.trademark.image img',
             'method' => ['attr:src']
         ],
         'name' => [
-            'selector_rule' => 'tbody tr td.trademark.words',
-            'method' => 'text',
+            'selector' => 'tr td.trademark.words',
+            'method' => 'text'
         ],
         'classes' => [
-            'selector_rule' => 'tbody tr td.classes',
+            'selector' => 'tr td.classes',
             'method' => 'text'
         ],
         'status' => [
-            'selector_rule' => 'tbody tr td.status span',
+            'selector' => 'tr td.status span',
             'method' => 'text'
         ]
     ];
+    const IS_JSON_MODE = true;
 
     public function __construct($htmlDOM)
     {
@@ -48,48 +52,47 @@ class Scraper
      */
     public function scrap()
     {
-        foreach ($this->scrappingSchema as $key => $schema) {
-            $elements = $this->htmlDOM->find($schema['selector_rule']);
-            $this->outputResultHelper($elements, $schema['method'], $key);
-        }
+        $this->getColumns();
+        $this->formResult();
+        $this->parseCount();
         return $this;
     }
 
-
-    /**
-     * Helper to processed all collections elements
-     * @param $elements
-     * @param $method
-     * @param $columnName
-     */
-    private function outputResultHelper($elements, $method, $columnName)
+    private function getColumns()
     {
-        $startArrayCount = 0;
-        foreach ($elements as $element) {
-            $elementItem = pq($element);
-            $this->result[$startArrayCount][$columnName] = $this->stripParameters($elementItem, $method);
-            $startArrayCount++;
+        $elements = $this->htmlDOM->find($this->columnRule['selector']);
+        foreach($elements as $element) {
+            $elemItem = pq($element);
+            $this->columns[] = $elemItem->{$this->columnRule['method']}();
         }
     }
 
-
-    /**
-     * Helper to call needed query selector method for some types of element collections.
-     * @param $elem
-     * @param $method
-     * @return mixed
-     */
-    private function stripParameters($elem, $method)
+    private function formResult()
     {
-        $isAttributeQueryMethod = (is_array($method)) ? true : false;
-        if ($isAttributeQueryMethod) {
-            $methodOptions = array_shift($method);
-            $methodOptions = explode(':', $methodOptions);
-            return $elem->{$methodOptions[0]}($methodOptions[1]);
+        foreach($this->columns as $key => $column) {
+            foreach($this->columnElemSchema as $schema => $schemaData) {
+                $selector = sprintf($this->columnBase, $column, $schemaData['selector']);
+                $element = $this->htmlDOM->find($selector);
+                if (is_array($schemaData['method'])) {
+                    $methodComponents = explode(':', array_shift($schemaData['method']));
+                    $this->result[$key][$schema] = $element->{$methodComponents[0]}($methodComponents[1]);
+                    continue;
+                }
+                $this->result[$key][$schema] = $element->{$schemaData['method']}();
+            }
         }
-        return $elem->{$method}();
     }
 
+    private function parseCount()
+    {
+        $this->totalCount = $this->htmlDOM->find($this->countSelector)->text();
+        echo $this->totalCount;
+    }
+
+    public function getCount()
+    {
+        return $this->totalCount;
+    }
 
     /**
      * Helper to return array of json string of scrapped data
