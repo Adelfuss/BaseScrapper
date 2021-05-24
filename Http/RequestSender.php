@@ -7,7 +7,10 @@ class RequestSender
     private $cookies = [];
     private $cookieString = '';
     private $scrfTokenValue = '';
-    private $response;
+    private $searchQuery = '';
+    private $paginationCount;
+    private $paginationParser;
+    private $pages;
     private $get_credentials_curl_options = [
         CURLOPT_URL => self::GET_CREDENTIALS,
         CURLOPT_RETURNTRANSFER => true,
@@ -20,17 +23,26 @@ class RequestSender
         CURLOPT_POST => true,
         CURLOPT_HTTPHEADER => [],
         CURLOPT_POSTFIELDS => '',
+        CURLOPT_FOLLOWLOCATION => true,
+    ];
+    private $get_pages_content_options = [
+        CURLOPT_URL => '%s?s=%s&p=%s',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [],
+        CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_FOLLOWLOCATION => true
     ];
     private $schema = [];
     const GET_CREDENTIALS = HOST_NAME . 'trademarks/search/advanced';
     const GET_TRADE_MARKS = HOST_NAME . 'trademarks/search/doSearch';
+    const GET_CONTENT_PAGE = HOST_NAME . 'trademarks/search/result';
     const FIND_COOKIE_REGEXP = '/^Set-Cookie:\s*([^;]*)/mi';
     const CSRF_TOKEN_COOKIE_NAME = 'XSRF-TOKEN';
 
-    public function  __construct($searchString)
+    public function  __construct($searchString, $paginationParser)
     {
         $this->searchString = $searchString;
+        $this->paginationParser = $paginationParser;
     }
 
     /**
@@ -39,28 +51,34 @@ class RequestSender
      */
     public  function send()
     {
+        $this->getScrappingData();
+        $this->getHtmlPages();
+        return $this;
+    }
+
+    private function getScrappingData()
+    {
         $this->getCredentials();
         $this->getCsrfToken();
         $this->formCookieString();
         $this->requestParametersSchema();
-        $this->buildParams();
-        $this->buildHeaders();
-        $this->getHtmlContent();
-        return $this;
+        $this->buildParams('get_trade_marks_curl_options');
+        $this->buildHeaders('get_trade_marks_curl_options');
     }
 
-    /**
-     * Method to get row data based on send method.
-     * @return mixed
-     */
+    private function getHtmlPages()
+    {
+        $this->getQueryResources();
+        $this->loadPagesContent();
+    }
+
+    
     public function get()
     {
-        return $this->response;
+        return $this->pages;
     }
 
-    /**
-     * Perform request to get neccesary cookies and CSRF token form.
-     */
+   
     private  function getCredentials()
     {
         $curlObj = curl_init();
@@ -70,22 +88,40 @@ class RequestSender
         curl_close($curlObj);
     }
 
-    /**
-     *  Executing post request and getting list of marks(row html)
-     */
-    private function getHtmlContent()
+    
+    private function getQueryResources()
     {
         $curl = curl_init();
         $this->formCurlOptions($curl, $this->get_trade_marks_curl_options);
-        $this->response = curl_exec($curl);
+        $this->getResultQueryString(curl_exec($curl));
+        $this->getPaginationCount();
         curl_close($curl);
     }
 
-    /**
-     * Helper to set all curl options in requests.
-     * @param $curl
-     * @param $optionsArray
-     */
+    private function loadPagesContent()
+    {
+        for($i = 0; $i < $this->paginationCount; $i++) {
+        $curl = curl_init();
+        $this->buildUrl('get_pages_content_options',$i);
+        $this->buildHeaders('get_pages_content_options');
+        $this->formCurlOptions($curl, $this->get_pages_content_options);
+        $this->pages[$i] = curl_exec($curl);
+        curl_close($curl);
+        $this->clearUrlOption('get_pages_content_options', '%s?s=%s&p=%s');
+        } 
+    }
+
+    private function getResultQueryString($response)
+    {
+        $this->searchQuery = $this->paginationParser->getResultString($response);
+    }
+
+    private function getPaginationCount()
+    {
+        $this->paginationCount = $this->paginationParser->getPagesCount();
+    }
+
+    
     private function formCurlOptions(&$curl, $optionsArray)
     {
         foreach ($optionsArray as $key => $value) {
@@ -93,10 +129,7 @@ class RequestSender
         }
     }
 
-    /**
-     * Forming array with cookie which will be send in post request
-     * @param $result
-     */
+    
     private  function formCookies($result)
     {
         preg_match_all(self::FIND_COOKIE_REGEXP ,$result,  $match_found);
@@ -106,18 +139,12 @@ class RequestSender
         }
     }
 
-
-    /**
-     * Set csrf token in proper property.
-     */
     private function getCsrfToken()
     {
         $this->scrfTokenValue = $this->cookies[self::CSRF_TOKEN_COOKIE_NAME];
     }
 
-    /**
-     * Forming cookie string to pass in headers for post request.
-     */
+    
     private  function formCookieString()
     {
         foreach ($this->cookies as $key => $value) {
@@ -126,9 +153,7 @@ class RequestSender
     }
 
 
-    /**
-     * Forming parameters for post request
-     */
+   
     private  function requestParametersSchema()
     {
         $this->schema =  [
@@ -140,21 +165,25 @@ class RequestSender
     }
 
 
-    /**
-     * Helper to process receiving post data
-     */
-    private function buildParams()
+    
+    private function buildParams($optionArrayName)
     {
-        $this->get_trade_marks_curl_options[CURLOPT_POSTFIELDS] = http_build_query($this->schema);
+        $this->{$optionArrayName}[CURLOPT_POSTFIELDS] = http_build_query($this->schema);
     }
 
-
-    /**
-     * Helper to form header to pass needed cookie.
-     */
-    private  function buildHeaders()
+    private function clearUrlOption($optionArrayName, $primaryValue)
     {
-        $this->get_trade_marks_curl_options[CURLOPT_HTTPHEADER] =  array('Cookie: ' . $this->cookieString);
+        $this->{$optionArrayName}[CURLOPT_URL] = $primaryValue;
+    }
+
+    private  function buildHeaders($optionArrayName)
+    {
+        $this->{$optionArrayName}[CURLOPT_HTTPHEADER] =  array('Cookie: ' . $this->cookieString);
+    }
+
+    private function buildUrl($optionArrayName, $id) 
+    {
+        $this->{$optionArrayName}[CURLOPT_URL] = sprintf($this->{$optionArrayName}[CURLOPT_URL], self::GET_CONTENT_PAGE, $this->searchQuery, $id);
     }
 
 }
